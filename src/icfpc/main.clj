@@ -8,16 +8,17 @@
    [jsonista.core :as json])
   (:import
    [java.util Date]
-   [org.jetbrains.skija BackendRenderTarget ColorSpace DirectContext Font FontStyle Matrix33 Paint PaintMode Path PixelGeometry Surface SurfaceColorFormat SurfaceOrigin SurfaceProps Typeface]
+   [org.jetbrains.skija BackendRenderTarget ColorSpace DirectContext Font FontStyle Matrix33 Paint PaintMode Path PixelGeometry Rect Surface SurfaceColorFormat SurfaceOrigin SurfaceProps Typeface]
    [org.jetbrains.jwm App EventFrame EventKeyboard EventMouseMove EventReconfigure EventResize Key LayerMetal Window]))
 
 (defonce *problem-id (atom nil))
 (defonce *problem (atom nil))
 (defonce *solution (atom nil))
+(defonce *saved-solution (atom nil))
+(defonce *saved-solutions (atom nil))
+(defonce *saved-solution-idx (atom nil))
 (defonce *last-solution (atom nil))
-(defonce *best-solution (atom nil))
-(defonce *best-solution-score (atom nil))
-(defonce *meta (atom nil))
+(defonce *meta (atom (edn/read-string (slurp "solutions/meta.edn"))))
 (defonce *scale (atom 1))
 (defonce *offset (atom [0 0]))
 (defonce *key (atom nil))
@@ -27,6 +28,9 @@
 (defonce *combinations (atom nil))
 (defonce *combination-id (atom nil))
 (def font (Font. (Typeface/makeFromName "SF Mono" (-> FontStyle/NORMAL (.withWeight 500))) 29.0))
+
+(defn zip [& seqs]
+  (apply map vector seqs))
 
 (defn color
   ([^long l]
@@ -46,26 +50,42 @@
       (map (fn [h] (distance h (closest h))))
       (reduce + 0))))
 
-(defn load-best-solution! [id]
-  (reset! *best-solution nil)
-  (reset! *best-solution-score nil)
-  (reset! *meta nil)
-  (let [dir (io/file "solutions" (str id))]
-    (when (.exists dir)
-      (let [min-dislikes (apply min
-                           (for [file (next (file-seq dir))
-                                 :when (re-matches #"(\d+).solution" (.getName file))
-                                 :let [[_ dislikes] (re-matches #"(\d+).solution" (.getName file))]]
-                             (Long/parseLong dislikes)))
-            best-solution (-> (str "solutions/" id "/" min-dislikes ".solution") slurp (json/read-value json/keyword-keys-object-mapper))]
-        (reset! *best-solution best-solution)
-        (reset! *best-solution-score (score (:hole @*problem) best-solution)))
-      (when (.exists (io/file dir "meta.edn"))
-        (let [meta (edn/read-string (slurp (io/file dir "meta.edn")))]
-          (reset! *meta meta))))))
+(defn load-ladder []
+  (println "Loading ladder from https://poses.live/problems")
+  (->> (http/get "https://poses.live/problems" {:headers {"Cookie" (System/getenv "ICFPC2021_COOKIE")}})
+    :body
+    (re-seq #"<tr><td><a href=\"/problems/(\d+)\">\d+</a></td><td>(\d+|❌)?</td><td>(\d+)?</td></tr>")
+    (map (fn [[_ id submitted best]]
+           [(some-> id Long/parseLong)
+            {:submitted (if (= "❌" submitted) -1 (some-> submitted Long/parseLong))
+             :best (some-> best Long/parseLong)}]))
+    (into {})))
+
+(def *ladder (atom (load-ladder)))
+
+(def lock (Object.))
+
+(defn update-file [file f & args]
+  (locking lock
+    (let [content  (-> file slurp edn/read-string)
+          content' (apply f content args)]
+      (when (= file "solutions/meta.edn")
+        (reset! *meta content'))
+      (spit file (pr-str content')))))
+
+(defn load-saved-solutions! [id]
+  (reset! *saved-solution-idx nil)
+  (reset! *saved-solutions
+    (let [dir (io/file (str "solutions/" id))]
+      (when (.exists dir)
+        (sort-by #(Long/parseLong %)
+          (for [file (next (file-seq dir))
+                :let [[_ score] (re-matches #"(\d+).solution" (.getName file))]
+                :when (some? score)]
+            score))))))
 
 (defn load-problem! [id]
-  (let [problem (-> (str "problems/" id ".problem")
+  (let [problem (-> (str "problems_day2/" id ".problem")
                   (slurp)
                   (json/read-value json/keyword-keys-object-mapper))
         max-x (reduce max (map first (concat (:hole problem) (:vertices (:figure problem)))))
@@ -78,7 +98,7 @@
     (reset! *vertex nil)
     (reset! *combinations nil)
     (reset! *combination-id nil)
-    (load-best-solution! id)))
+    (load-saved-solutions! id)))
 
 (add-watch *problem-id :load (fn [_ _ _ id] (load-problem! id)))
 
@@ -142,9 +162,16 @@
       (.closePath path)
       (.transform path (Matrix33/makeScale scale))
       (.drawPath canvas path paint)
-      (.setColor paint (color 0xFF000000))
-      #_(doseq [[[x y] idx] (map vector hole (range))]
-        (.drawString canvas (str "#" idx " [" x " " y "]") (* scale x) (* scale y) font paint)))))
+
+      (.setColor paint (color 0xFF808080))
+      (doseq [[x y] hole]
+        (.drawRect canvas (Rect/makeXYWH (- (* scale x) 4) (- (* scale y) 4) 8 8) paint))
+
+      ;; bonuses
+      (doseq [{:keys [position problem bonus]} (:bonuses @*problem)
+              :let [[x y] position]]
+        (.drawRect canvas (Rect/makeXYWH (- (* scale x) 10) (- (* scale y) 10) 20 20) paint)
+        (.drawString canvas (str (str/capitalize bonus) " for #" problem) (+ (* scale x) 20) (+ (* scale y) 10) font paint)))))
 
 (defn draw-grid [canvas]
   (let [scale @*scale
@@ -160,7 +187,8 @@
 (defn paint [canvas]
   (let [scale @*scale
         {:keys [hole epsilon figure]} @*problem
-        {:keys [edges vertices]} @*solution]
+        {:keys [edges vertices]} @*solution
+        *all-good? (atom true)]
     (.clear canvas (color 0xFFFFFFFF))
     
     (.save canvas)
@@ -176,14 +204,6 @@
                     [x2 y2] (nth (:vertices figure) to)]]
         (.drawLine canvas (* scale x1) (* scale y1) (* scale x2) (* scale y2) paint)))
 
-    ;; best-solution
-    (when-some [{:keys [edges vertices]} @*best-solution]
-      (with-open [paint (-> (Paint.) (.setColor (color 0x203333CC)) (.setMode PaintMode/STROKE) (.setStrokeWidth 4))]
-        (doseq [[from to] edges
-                :let [[x1 y1] (nth vertices from)
-                      [x2 y2] (nth vertices to)]]
-          (.drawLine canvas (* scale x1) (* scale y1) (* scale x2) (* scale y2) paint))))
-
     ;; solution
     (with-open [text   (Paint.)
                 line   (-> (Paint.) (.setMode PaintMode/STROKE) (.setStrokeWidth 4))
@@ -198,12 +218,18 @@
               ratio (Math/abs (double (- (/ d d') 1)))
               good? (<= ratio (/ epsilon 1000000))]
           (when-not good?
-            (.drawCircle canvas (* scale x1) (* scale y1) (* scale (Math/sqrt d')) circle)
-            (.drawCircle canvas (* scale x2) (* scale y2) (* scale (Math/sqrt d')) circle))
+            (reset! *all-good? false)
+            (when (and @*vertex (= (nth (:vertices @*solution) @*vertex) [x2 y2]))
+              (.drawCircle canvas (* scale x1) (* scale y1) (* scale (Math/sqrt d')) circle))
+            (when (and @*vertex (= (nth (:vertices @*solution) @*vertex) [x1 y1]))
+              (.drawCircle canvas (* scale x2) (* scale y2) (* scale (Math/sqrt d')) circle)))
           (.setColor line (if good? (color 0xFF33CC33) (color 0xFFCC3333)))
           (.drawLine canvas (* scale x1) (* scale y1) (* scale x2) (* scale y2) line)
           (.setColor text (if good? (color 0xFF33CC33) (color 0xFFCC3333)))
-          (.drawString canvas (str ratio) (* scale (/ (+ x1 x2) 2)) (* scale (/ (+ y1 y2) 2)) font text))))
+          (.drawString canvas (str ratio) (* scale (/ (+ x1 x2) 2)) (* scale (/ (+ y1 y2) 2)) font text)))
+      (-> line (.setColor (color 0xFF808080)) (.setMode PaintMode/FILL))
+      (doseq [[x y] vertices]
+        (.drawRect canvas (Rect/makeXYWH (- (* scale x) 4) (- (* scale y) 4) 8 8) line)))
 
     ;; current vertex
     (when-some [vertex @*vertex]
@@ -215,33 +241,90 @@
 
     ;; stats
     (with-open [paint (-> (Paint.) (.setColor (color 0xFF000000)))]
-      (let [draw-string (fn [str]
-                          (.drawString canvas str 0 0 font paint)
-                          (.translate canvas 0 40))]
+      (let [draw-string (fn draw-string
+                          ([str] (draw-string str 0xFF000000))
+                          ([str color-long]
+                            (.setColor paint (color color-long))
+                            (.drawString canvas str 0 0 font paint)
+                            (.translate canvas 0 40)))
+            {:keys [submitted best]} (get @*ladder @*problem-id)
+            score (score hole @*solution)]
         (.save canvas)
         (.translate canvas 40 60)
         (draw-string (str "Problem " @*problem-id))
-        (draw-string (str "Holes " (count (:hole @*problem))))
-        (draw-string (str "Vertices " (count (:vertices @*solution))))
-        (draw-string (str "Edges " (count (:edges @*solution))))
+        ; (draw-string (str "Holes " (count (:hole @*problem))))
+        ; (draw-string (str "Vertices " (count (:vertices @*solution))))
+        ; (draw-string (str "Edges " (count (:edges @*solution))))
         (draw-string (str "Epsilon " (float (/ (:epsilon @*problem) 1000000))))
-        (draw-string (str "Score " (score hole @*solution)))
+        (when-some [[from bonus] (first (for [[from {:keys [problem bonus]}] @*meta
+                                              :when (= problem @*problem-id)]
+                                          [from bonus]))]
+          (draw-string (str "Bonus: " bonus " from #" from) 0xFF3333CC))
+        (draw-string (str "Current score " score)
+          (cond
+            (not @*all-good?) 0xFFCC3333
+            (<= score best) 0xFF33CC33
+            (and
+              (not (empty? @*saved-solutions))
+              (< score (Long/parseLong (first @*saved-solutions)))) 0xFF33CC33
+            :else 0xFF000000))
+        (draw-string (str "Best score " best)
+          (cond
+            (nil? submitted) 0xFFCC3333
+            (> submitted best) 0xFFFF8033
+            :else 0xFF33CC33))
+        (when-not (empty? @*saved-solutions)
+          (draw-string "Saved:"))
+        (doseq [[name i] (zip @*saved-solutions (range))
+                :let [submitted? (= (str submitted) name)]]
+          (draw-string (str (if (= i @*saved-solution-idx) "> " "  ") name (when submitted? " [Submitted]"))))
         (when-some [combination-id @*combination-id]
           (draw-string (str "Combination " combination-id " of " (count @*combinations))))
         (when (<= (count (:hole @*problem)) (count (:vertices @*solution)))
           (draw-string (str "Total combinations "
                          (/ (factorial (count (:vertices @*solution)))
                            (factorial (- (count (:vertices @*solution)) (count (:hole @*problem))))))))
-        (draw-string (str "Best score " (if-some [score @*best-solution-score] score "—")))
-        (doseq [[k v] @*meta]
-          (draw-string (str (name k) " " v)))
-        (draw-string "[S] Save solution")
-        (draw-string "[U] Upload best solution")
+        ; (draw-string (str "Best score " (if-some [score @*best-solution-score] score "—")))
+        ; (doseq [[k v] @*meta]
+        ;   (draw-string (str (name k) " " v)))
+        (draw-string "[S] Save")
+        (draw-string "[U] Upload")
 
         (.restore canvas)))))
 
+(defn upload! []
+  (when (some? @*saved-solution-idx) ;; check if saved
+    (let [problem-id @*problem-id
+          url        (str "https://poses.live/api/problems/" problem-id "/solutions")
+          bonus      (first
+                       (for [bonus  (:bonuses @*problem)
+                             vertex (:vertices @*solution)
+                             :when  (= (:position bonus) vertex)]
+                         bonus))]
+      (println "Eligible for bonus" (:bonus bonus) "for problem" (:problem bonus))
+      (update-file "solutions/meta.edn"
+        (fn [solutions]
+          (if (some? bonus)
+            (update solutions @*problem-id merge bonus)
+            (update solutions @*problem-id dissoc :bonus :position :problem))))
+
+      (println "Submitting solution to" url)
+      (http/post url
+        {:body (json/write-value-as-string @*solution)
+         :headers {"Authorization" (str "Bearer " (System/getenv "ICFPC2021_TOKEN"))}
+         :content-type :json
+         :retry-handler (fn [ex try-count http-context] false)
+         :async? true}
+        (fn [response]
+          (println "Accepted:" response)
+          (update-file "solutions/meta.edn" update @*problem-id assoc
+            :uploaded-score (score (:hole @*problem) @*solution)
+            :uploaded-inst (Date.))
+          (.start (Thread. #(do (Thread/sleep 5000) (reset! *ladder (load-ladder))))))
+        (fn [exception] (println "Refused:" (.getMessage exception)))))))
+
 (defn -main [& args]
-  (reset! *problem-id 1)
+  (reset! *problem-id 37)
   (App/init)
   (let [window  (App/makeWindow)
         layer   (LayerMetal.)
@@ -264,50 +347,59 @@
                 Key/RIGHT
                 (let [next-id (loop [id (+ @*problem-id 1)]
                                 (cond
-                                  (> id 78) (recur 1)
-                                  (not (.exists (io/file (str "problems/" id ".problem")))) (recur (inc id))
+                                  (> id 88) (recur 1)
+                                  (not (.exists (io/file (str "problems_day2/" id ".problem")))) (recur (inc id))
                                   :else id))]
                   (reset! *problem-id next-id))
+
                 Key/LEFT
                 (let [next-id (loop [id (- @*problem-id 1)]
                                 (cond
-                                  (< id 1) (recur 78)
-                                  (not (.exists (io/file (str "problems/" id ".problem")))) (recur (dec id))
+                                  (< id 1) (recur 88)
+                                  (not (.exists (io/file (str "problems_day2/" id ".problem")))) (recur (dec id))
                                   :else id))]
                   (reset! *problem-id next-id))
+
+                Key/DOWN
+                (when-some [saved-solutions (not-empty @*saved-solutions)]
+                  (let [i (-> (or @*saved-solution-idx -1) (+ 1) (mod (count saved-solutions)))
+                        score (nth saved-solutions i)
+                        json (-> (str "solutions/" @*problem-id "/" score ".solution")
+                               (slurp)
+                               (json/read-value json/keyword-keys-object-mapper))]
+                    (reset! *saved-solution-idx i)
+                    (reset! *solution json)))
+
+                Key/UP
+                (when-some [saved-solutions (not-empty @*saved-solutions)]
+                  (let [i (-> (or @*saved-solution-idx 0) (+ (count saved-solutions)) (- 1) (mod (count saved-solutions)))
+                        score (nth saved-solutions i)
+                        json (-> (str "solutions/" @*problem-id "/" score ".solution")
+                               (slurp)
+                               (json/read-value json/keyword-keys-object-mapper))]
+                    (reset! *saved-solution-idx i)
+                    (reset! *solution json)))
+
                 Key/S
                 (let [score (score (:hole @*problem) @*solution)
                       file (io/file (str "solutions/" @*problem-id "/" score ".solution"))]
                   (.mkdirs (.getParentFile file))
                   (spit file (json/write-value-as-string @*solution))
-                  (load-best-solution! @*problem-id))
+                  (load-saved-solutions! @*problem-id)
+                  (let [i (.indexOf @*saved-solutions (str score))]
+                    (reset! *saved-solution-idx i)))
+
                 Key/C
                 (next-combination)
+
                 Key/SPACE
                 (do
                   (reset! *last-mouse @*mouse)
                   (reset! *last-solution @*solution))
+
                 Key/U
-                (when-some [best-solution @*best-solution]
-                  (let [problem-id @*problem-id
-                        best-solution-score @*best-solution-score
-                        url (str "https://poses.live/api/problems/" problem-id "/solutions")]
-                    (println "Submitting" best-solution-score "solution to" url)
-                    (http/post url
-                      {:body (json/write-value-as-string @*best-solution)
-                       :headers {"Authorization" (str "Bearer " (System/getenv "ICFPC2021_TOKEN"))}
-                       :content-type :json
-                       :retry-handler (fn [ex try-count http-context] false)
-                       :async? true}
-                      (fn [response]
-                        (println "Accepted:" response)
-                        (spit (io/file (str "solutions/" problem-id "/meta.edn"))
-                          (pr-str {:uploaded-score best-solution-score
-                                   :uploaded-inst (Date.)}))
-                        (when (= problem-id @*problem-id)
-                          (load-best-solution! problem-id)))
-                      (fn [exception] (println "Refused:" (.getMessage exception))))))
-                ;; else
+                (upload!)
+                ; else
                 nil))
 
             (and (instance? EventKeyboard event) (not (.isPressed event)))
@@ -322,6 +414,8 @@
               (if (= @*key Key/SPACE)
                 (let [dx (-> (- (.getX event) (first @*last-mouse)) (/ @*scale) (double) (Math/round))
                       dy (-> (- (.getY event) (second @*last-mouse)) (/ @*scale) (double) (Math/round))]
+                  (when (or (> (Math/abs dx) 0) (> (Math/abs dy) 0))
+                    (reset! *saved-solution-idx nil))
                   (if-some [vertex @*vertex]
                     (reset! *solution (update-in @*last-solution [:vertices vertex] (fn [[x y]] [(+ x dx) (+ y dy)])))
                     (reset! *solution (update @*last-solution :vertices #(mapv (fn [[x y]] [(+ x dx) (+ y dy)]) %)))))
