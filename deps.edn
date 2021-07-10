@@ -1,0 +1,12 @@
+{:deps
+ {org.clojure/clojure {:mvn/version "1.10.3"}
+  org.jetbrains.skija/skija-macos-arm64 {:mvn/version "0.92.12"}
+  org.jetbrains.jwm/jwm-macos-arm64 {:mvn/version "0.1.56"}
+  metosin/jsonista {:mvn/version "0.3.3"}
+  clj-http/clj-http {:mvn/version "3.12.3"}
+  org.clojure/math.combinatorics {:mvn/version "0.1.6"}}
+
+ ;; :paths ["src" "/Users/prokopov/ws/jwm/shared/target/classes" "/Users/prokopov/ws/jwm/macos/target/classes" "/Users/prokopov/ws/jwm/macos/build"]
+ 
+ :mvn/repos {"space-skija" {:url "https://packages.jetbrains.team/maven/p/skija/maven"}
+             "space-jwm" {:url "https://packages.jetbrains.team/maven/p/jwm/maven"}}}
