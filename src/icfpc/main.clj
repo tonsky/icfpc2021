@@ -229,7 +229,8 @@
           (.drawString canvas (str ratio) (* scale (/ (+ x1 x2) 2)) (* scale (/ (+ y1 y2) 2)) font text)))
       (-> line (.setColor (color 0xFF808080)) (.setMode PaintMode/FILL))
       (doseq [[x y] vertices]
-        (.drawRect canvas (Rect/makeXYWH (- (* scale x) 4) (- (* scale y) 4) 8 8) line)))
+        (.drawRect canvas (Rect/makeXYWH (- (* scale x) 4) (- (* scale y) 4) 8 8) line)
+        (.drawString canvas (str x "," y) (* scale x) (* scale y) font text)))
 
     ;; current vertex
     (when-some [vertex @*vertex]
@@ -324,7 +325,7 @@
         (fn [exception] (println "Refused:" (.getMessage exception)))))))
 
 (defn -main [& args]
-  (reset! *problem-id 89)
+  (reset! *problem-id 28)
   (App/init)
   (let [window  (App/makeWindow)
         layer   (LayerMetal.)
@@ -335,13 +336,18 @@
         (accept [this event]
           (cond
             (instance? EventReconfigure event)
-            (.reconfigure layer)
+            (do
+              (.reconfigure layer)
+              (.requestFrame window))
 
             (instance? EventResize event)
-            (.resize layer (.getWidth event) (.getHeight event))
+            (do
+              (.resize layer (.getWidth event) (.getHeight event))
+              (.requestFrame window))
 
             (and (instance? EventKeyboard event) (.isPressed event))
             (when (nil? @*key)
+              (.requestFrame window)
               (reset! *key (.getKeyCode event))
               (condp = (.getKeyCode event)
                 Key/RIGHT
@@ -410,6 +416,7 @@
 
             (instance? EventMouseMove event)
             (do
+              (.requestFrame window)
               (reset! *mouse [(.getX event) (.getY event)])
               (if (= @*key Key/SPACE)
                 (let [dx (-> (- (.getX event) (first @*last-mouse)) (/ @*scale) (double) (Math/round))
@@ -440,8 +447,7 @@
                                   (SurfaceProps. PixelGeometry/RGB_H))]
               (paint (.getCanvas surface))
               (.flushAndSubmit surface)
-              (.swapBuffers layer)
-              (.requestFrame window))
+              (.swapBuffers layer))
 
             :else
             (println event)))))
