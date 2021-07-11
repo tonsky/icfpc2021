@@ -261,10 +261,12 @@ pub fn save_solution(problem: Problem, vertices: []Point, allocator: *std.mem.Al
 }
 
 pub fn main() !void {
-    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // defer _ = gpa.deinit();
-    // var allocator = &gpa.allocator;
-    var allocator = std.testing.allocator;
+    const timer = std.time.Timer.start() catch unreachable;
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var allocator = &gpa.allocator;
+    // var allocator = std.testing.allocator;
 
     var args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
@@ -282,6 +284,11 @@ pub fn main() !void {
     const vertices = problem.vertices.len;
     const stack = try allocator.alloc(Point, vertices);
     defer allocator.free(stack);
+
+    // const order = try allocator.alloc(usize, vertices);
+    // defer allocator.free(order);
+    // order = 1, 3, 5
+
     var stack_idx: usize = 0;
     var epsilon = @intToFloat(f64, problem.epsilon) / 1000000.0;
     stack[0] = Point{ .x = problem.minx, .y = problem.miny };
@@ -327,6 +334,28 @@ pub fn main() !void {
             if (old_len > 0) { // edge exist
                 const new_len = distance(stack[i], stack[stack_idx]);
                 if (std.math.absFloat(new_len / old_len - 1.0) > epsilon) {
+                    if (new_len > old_len) { // optimization!
+                        const nexty = stack[i].y - @floatToInt(i64, std.math.ceil(old_len * (1 + epsilon)));
+                        if (nexty > stack[stack_idx].y) {
+                            stack[stack_idx].y = nexty;
+                            stack[stack_idx].x = problem.minx;
+                            continue :outer;
+                        } else if (@intToFloat(f64, stack[stack_idx].y - stack[i].y) > old_len * (1 + epsilon)) {
+                            stack[stack_idx].y = problem.maxy;
+                            continue :outer;
+                        } else if (stack[stack_idx].x > stack[i].x) {
+                            stack[stack_idx].x = problem.maxx;
+                            continue :outer;
+                        } else {
+                            stack[stack_idx].x += @floatToInt(i64, std.math.floor(new_len - (old_len * (1 + epsilon))));
+                            continue :outer;
+                        }
+                    } else if (new_len < old_len) {
+                        if (stack[stack_idx].x < stack[i].x) {
+                            stack[stack_idx].x = stack[i].x + stack[i].x - stack[stack_idx].x;
+                            continue :outer;
+                        }
+                    }
                     stack[stack_idx].x += 1;
                     continue :outer;
                 }
@@ -355,11 +384,15 @@ pub fn main() !void {
             if (best_score == -1 or score < best_score) {
                 best_score = score;
                 std.mem.copy(Point, best_stack, stack);
-                std.debug.print("score={} {{\"vertices\": [", .{ score });
-                for (stack) |p| {
-                    std.debug.print("[{},{}], ", .{ p.x, p.y });
+                std.debug.print("score={} time={} ms vertices=[", .{ score, timer.read() / 1_000_000 });
+                for (stack) |p, j| {
+                    std.debug.print("[{},{}]", .{ p.x, p.y });
+                    if (j < stack.len - 1) {
+                        std.debug.print(", ", .{});
+                    }
                 }
-                std.debug.print("]}}\n", .{});
+                std.debug.print("]\n", .{});
+                try save_solution(problem, stack, allocator);
             }
             stack[stack_idx].x += 1;
             continue;
@@ -373,4 +406,5 @@ pub fn main() !void {
     if (best_score > -1) {
         try save_solution(problem, best_stack, allocator);
     }
+    std.debug.print("Solved in {} ms\n", .{ timer.read() / 1_000_000 });
 }
