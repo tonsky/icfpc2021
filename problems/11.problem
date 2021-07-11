@@ -1,0 +1,1 @@
+{"bonuses":[{"bonus":"BREAK_A_LEG","problem":31,"position":[5,5]},{"bonus":"GLOBALIST","problem":20,"position":[9,6]},{"bonus":"GLOBALIST","problem":49,"position":[6,9]}],"hole":[[10,0],[10,10],[0,10]],"epsilon":0,"figure":{"edges":[[0,1],[1,2],[2,0]],"vertices":[[0,0],[10,0],[10,10]]}}

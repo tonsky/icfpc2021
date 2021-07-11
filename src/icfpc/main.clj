@@ -85,7 +85,7 @@
             score))))))
 
 (defn load-problem! [id]
-  (let [problem (-> (str "problems_day2/" id ".problem")
+  (let [problem (-> (str "problems/" id ".problem")
                   (slurp)
                   (json/read-value json/keyword-keys-object-mapper))
         max-x (reduce max (map first (concat (:hole problem) (:vertices (:figure problem)))))
@@ -324,7 +324,7 @@
         (fn [exception] (println "Refused:" (.getMessage exception)))))))
 
 (defn -main [& args]
-  (reset! *problem-id 37)
+  (reset! *problem-id 89)
   (App/init)
   (let [window  (App/makeWindow)
         layer   (LayerMetal.)
@@ -347,16 +347,16 @@
                 Key/RIGHT
                 (let [next-id (loop [id (+ @*problem-id 1)]
                                 (cond
-                                  (> id 88) (recur 1)
-                                  (not (.exists (io/file (str "problems_day2/" id ".problem")))) (recur (inc id))
+                                  (> id 132) (recur 1)
+                                  (not (.exists (io/file (str "problems/" id ".problem")))) (recur (inc id))
                                   :else id))]
                   (reset! *problem-id next-id))
 
                 Key/LEFT
                 (let [next-id (loop [id (- @*problem-id 1)]
                                 (cond
-                                  (< id 1) (recur 88)
-                                  (not (.exists (io/file (str "problems_day2/" id ".problem")))) (recur (dec id))
+                                  (< id 1) (recur 132)
+                                  (not (.exists (io/file (str "problems/" id ".problem")))) (recur (dec id))
                                   :else id))]
                   (reset! *problem-id next-id))
 
