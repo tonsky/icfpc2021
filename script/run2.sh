@@ -4,4 +4,4 @@
 
 # zig run -O ReleaseFast src/bruteforce.zig -- problems/28.problem
 
-zig run -O ReleaseFast src/bruteforce.zig -- 48
+zig run -O ReleaseFast src/bruteforce.zig -- 30

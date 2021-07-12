@@ -8,7 +8,7 @@
    [jsonista.core :as json])
   (:import
    [java.util Date]
-   [org.jetbrains.skija BackendRenderTarget ColorSpace DirectContext Font FontStyle Matrix33 Paint PaintMode Path PixelGeometry Rect Surface SurfaceColorFormat SurfaceOrigin SurfaceProps Typeface]
+   [org.jetbrains.skija BackendRenderTarget ColorSpace DirectContext Font FontStyle Matrix33 Paint PaintMode Path PixelGeometry Rect RRect Surface SurfaceColorFormat SurfaceOrigin SurfaceProps Typeface]
    [org.jetbrains.jwm App EventFrame EventKeyboard EventMouseMove EventReconfigure EventResize Key LayerMetal Window]))
 
 (defonce *problem-id (atom nil))
@@ -179,8 +179,8 @@
     (with-open [paint (-> (Paint.) (.setColor (color 0xFFCCCCCC)) (.setMode PaintMode/STROKE) (.setStrokeWidth 2))]
       (let [max-x (reduce max (map first hole))
             max-y (reduce max (map second hole))]
-        (doseq [x (range 0 max-x 10)
-                y (range 0 max-y 10)]
+        (doseq [x (range 0 max-x 1)
+                y (range 0 max-y 1)]
           (.drawLine canvas 0 (* scale y) (* scale max-x) (* scale y) paint)
           (.drawLine canvas (* scale x) 0 (* scale x) (* scale max-y) paint))))) )
 
@@ -207,7 +207,7 @@
     ;; solution
     (with-open [text   (Paint.)
                 line   (-> (Paint.) (.setMode PaintMode/STROKE) (.setStrokeWidth 4))
-                circle (-> (Paint.) (.setColor (color 0xFFCC3333)) (.setMode PaintMode/STROKE) (.setStrokeWidth 1))]
+                circle (-> (Paint.) (.setColor (color 0x40CC3333)))]
       (doseq [[from to] edges]
         (let [[x1 y1] (nth vertices from)
               [x2 y2] (nth vertices to)
@@ -219,10 +219,18 @@
               good? (<= ratio (/ epsilon 1000000))]
           (when-not good?
             (reset! *all-good? false)
-            (when (and @*vertex (= (nth (:vertices @*solution) @*vertex) [x2 y2]))
-              (.drawCircle canvas (* scale x1) (* scale y1) (* scale (Math/sqrt d')) circle))
-            (when (and @*vertex (= (nth (:vertices @*solution) @*vertex) [x1 y1]))
-              (.drawCircle canvas (* scale x2) (* scale y2) (* scale (Math/sqrt d')) circle)))
+            (let [mind (Math/sqrt (* d' (- 1 (/ epsilon 1000000))))
+                  maxd (Math/sqrt (* d' (+ 1 (/ epsilon 1000000))))]
+              (when (and @*vertex (= (nth (:vertices @*solution) @*vertex) [x2 y2]))
+                (.drawDRRect canvas
+                  (RRect/makeXYWH (* scale (- x1 maxd)) (* scale (- y1 maxd)) (* 2 scale maxd) (* 2 scale maxd) (* scale maxd))
+                  (RRect/makeXYWH (* scale (- x1 mind)) (* scale (- y1 mind)) (* 2 scale mind) (* 2 scale mind) (* scale mind))
+                  circle))
+              (when (and @*vertex (= (nth (:vertices @*solution) @*vertex) [x1 y1]))
+                (.drawDRRect canvas
+                  (RRect/makeXYWH (* scale (- x2 maxd)) (* scale (- y2 maxd)) (* 2 scale maxd) (* 2 scale maxd) (* scale maxd))
+                  (RRect/makeXYWH (* scale (- x2 mind)) (* scale (- y2 mind)) (* 2 scale mind) (* 2 scale mind) (* scale mind))
+                  circle))))
           (.setColor line (if good? (color 0xFF33CC33) (color 0xFFCC3333)))
           (.drawLine canvas (* scale x1) (* scale y1) (* scale x2) (* scale y2) line)
           (.setColor text (if good? (color 0xFF33CC33) (color 0xFFCC3333)))
@@ -326,7 +334,7 @@
         (fn [exception] (println "Refused:" (.getMessage exception)))))))
 
 (defn -main [& args]
-  (reset! *problem-id 42)
+  (reset! *problem-id 48)
   (App/init)
   (let [window  (App/makeWindow)
         layer   (LayerMetal.)

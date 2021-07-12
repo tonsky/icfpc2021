@@ -231,7 +231,7 @@ pub fn calc_score(problem: Problem, vertices: []Point) i64 {
     return res;
 }
 
-pub fn save_solution(problem: Problem, vertices: []Point, allocator: *std.mem.Allocator) !void {
+pub fn save_solution(problem: Problem, order: []const usize, vertices: []Point, allocator: *std.mem.Allocator) !void {
     const score = calc_score(problem, vertices);
     const dir = try std.fmt.allocPrint(allocator, "solutions/{}", .{ problem.id });
     defer allocator.free(dir);
@@ -246,15 +246,23 @@ pub fn save_solution(problem: Problem, vertices: []Point, allocator: *std.mem.Al
     defer file.close();
     const writer = file.writer();
     try writer.writeAll("{\"vertices\":[");
-    for (vertices) |vertex, i| {
-        try writer.print("[{},{}]", .{ vertex.x, vertex.y });
-        if (i < vertices.len - 1)
-            try writer.writeAll(",");
+    var i: usize = 0;
+    while (i < vertices.len) : (i += 1) {
+        var j: usize = 0;
+        while (j < vertices.len) : (j += 1) {
+            if (order[j] == i) {
+                const vertex = vertices[j];
+                try writer.print("[{},{}]", .{ vertex.x, vertex.y });
+                if (i < vertices.len - 1)
+                    try writer.writeAll(",");
+                break;
+            }
+        }
     }
     try writer.writeAll("],\"edges\":[");
-    for (problem.edges) |edge, i| {
+    for (problem.edges) |edge, k| {
         try writer.print("[{},{}]", .{ edge.from, edge.to });
-        if (i < problem.edges.len - 1)
+        if (k < problem.edges.len - 1)
             try writer.writeAll(",");
     }
     try writer.writeAll("]}");
@@ -285,9 +293,14 @@ pub fn main() !void {
     const stack = try allocator.alloc(Point, vertices);
     defer allocator.free(stack);
 
-    // const order = try allocator.alloc(usize, vertices);
-    // defer allocator.free(order);
-    // order = 1, 3, 5
+    const order = try allocator.alloc(usize, vertices);
+    defer allocator.free(order);
+    {
+        var i: usize = 0;
+        while (i < vertices) : (i += 1) {
+            order[i] = i;
+        } 
+    }
 
     var stack_idx: usize = 0;
     var epsilon = @intToFloat(f64, problem.epsilon) / 1000000.0;
@@ -299,9 +312,11 @@ pub fn main() !void {
         const x = stack[stack_idx].x;
         const y = stack[stack_idx].y;
 
-        // std.debug.print("x={} y={} stack_idx={} ", .{ x, y, stack_idx });
-        // for (stack) |p| {
-        //     std.debug.print("[{},{}], ", .{ p.x, p.y });
+        // std.debug.print("x={} y={} maxx={} maxy={} stack_idx={} ", .{ x, y, problem.maxx, problem.maxy, stack_idx });
+        // for (stack) |p, j| {
+        //     if (j <= stack_idx) {
+        //         std.debug.print("[{},{}], ", .{ p.x, p.y });
+        //     }
         // }
         // std.debug.print("\n", .{});
 
@@ -330,25 +345,28 @@ pub fn main() !void {
         // if edges have acceptable length
         var i: usize = 0;
         while (i < stack_idx) : (i += 1) { // all vertices already set
-            const old_len = edges_matrix[i * vertices + stack_idx];
+            const old_len = edges_matrix[order[i] * vertices + order[stack_idx]];
             if (old_len > 0) { // edge exist
                 const new_len = distance(stack[i], stack[stack_idx]);
                 if (std.math.absFloat(new_len / old_len - 1.0) > epsilon) {
                     if (new_len > old_len) { // optimization!
-                        const nexty = stack[i].y - @floatToInt(i64, std.math.ceil(old_len * (1 + epsilon)));
+                        const nexty = stack[i].y - @floatToInt(i64, std.math.ceil(std.math.sqrt(old_len * (1.0 + epsilon))));
                         if (nexty > stack[stack_idx].y) {
                             stack[stack_idx].y = nexty;
                             stack[stack_idx].x = problem.minx;
                             continue :outer;
-                        } else if (@intToFloat(f64, stack[stack_idx].y - stack[i].y) > old_len * (1 + epsilon)) {
+                        } else if (@intToFloat(f64, stack[stack_idx].y - stack[i].y) > std.math.sqrt(old_len * (1.0 + epsilon))) {
                             stack[stack_idx].y = problem.maxy;
                             continue :outer;
                         } else if (stack[stack_idx].x > stack[i].x) {
                             stack[stack_idx].x = problem.maxx;
                             continue :outer;
                         } else {
-                            stack[stack_idx].x += @floatToInt(i64, std.math.floor(new_len - (old_len * (1 + epsilon))));
-                            continue :outer;
+                            const dx = @floatToInt(i64, std.math.floor(std.math.sqrt(new_len) - std.math.sqrt(old_len * (1.0 + epsilon))));
+                            if (dx > 0) {
+                                stack[stack_idx].x += dx;
+                                continue :outer;
+                            }
                         }
                     } else if (new_len < old_len) {
                         if (stack[stack_idx].x < stack[i].x) {
@@ -365,7 +383,7 @@ pub fn main() !void {
         // if edges intersect hole
         i = 0;
         while (i < stack_idx) : (i += 1) { // all vertices already set
-            const old_len = edges_matrix[i * vertices + stack_idx];
+            const old_len = edges_matrix[order[i] * vertices + order[stack_idx]];
             if (old_len > 0) { // edge exist
                 // iterate over hole edges
                 var from: usize = 0;
@@ -385,14 +403,22 @@ pub fn main() !void {
                 best_score = score;
                 std.mem.copy(Point, best_stack, stack);
                 std.debug.print("score={} time={} ms vertices=[", .{ score, timer.read() / 1_000_000 });
-                for (stack) |p, j| {
-                    std.debug.print("[{},{}]", .{ p.x, p.y });
-                    if (j < stack.len - 1) {
-                        std.debug.print(", ", .{});
+                i = 0;
+                while (i < stack.len) : (i += 1) {
+                    var j: usize = 0;
+                    while (j < order.len) : (j += 1) {
+                        if (order[j] == i) {
+                            const p = stack[j];
+                            std.debug.print("[{},{}]", .{ p.x, p.y });
+                            if (i < stack.len - 1) {
+                                std.debug.print(", ", .{});
+                            }
+                            break;
+                        }
                     }
                 }
                 std.debug.print("]\n", .{});
-                try save_solution(problem, stack, allocator);
+                try save_solution(problem, order, stack, allocator);
             }
             stack[stack_idx].x += 1;
             continue;
@@ -404,7 +430,7 @@ pub fn main() !void {
     }
 
     if (best_score > -1) {
-        try save_solution(problem, best_stack, allocator);
+        try save_solution(problem, order, best_stack, allocator);
     }
     std.debug.print("Solved in {} ms\n", .{ timer.read() / 1_000_000 });
 }
