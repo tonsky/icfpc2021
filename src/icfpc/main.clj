@@ -234,11 +234,11 @@
           (.setColor line (if good? (color 0xFF33CC33) (color 0xFFCC3333)))
           (.drawLine canvas (* scale x1) (* scale y1) (* scale x2) (* scale y2) line)
           (.setColor text (if good? (color 0xFF33CC33) (color 0xFFCC3333)))
-          (.drawString canvas (str ratio) (* scale (/ (+ x1 x2) 2)) (* scale (/ (+ y1 y2) 2)) font text)))
+          #_(.drawString canvas (str ratio) (* scale (/ (+ x1 x2) 2)) (* scale (/ (+ y1 y2) 2)) font text)))
       (-> line (.setColor (color 0xFF808080)) (.setMode PaintMode/FILL))
       (doseq [[[x y] i] (zip vertices (range))]
         (.drawRect canvas (Rect/makeXYWH (- (* scale x) 4) (- (* scale y) 4) 8 8) line)
-        (.drawString canvas (str "#" i " " x "," y) (* scale x) (* scale y) font text)))
+        #_(.drawString canvas (str "#" i " " x "," y) (* scale x) (* scale y) font text)))
 
     ;; current vertex
     (when-some [vertex @*vertex]
@@ -334,7 +334,7 @@
         (fn [exception] (println "Refused:" (.getMessage exception)))))))
 
 (defn -main [& args]
-  (reset! *problem-id 50)
+  (reset! *problem-id 8)
   (App/init)
   (let [window  (App/makeWindow)
         layer   (LayerMetal.)

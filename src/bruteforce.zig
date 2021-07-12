@@ -491,9 +491,9 @@ pub fn main() !void {
                 const score = calc_score(problem, stack);
                 if (best_score == -1 or score < best_score) {
                     if (best_score_saved != -1) {
-                        const path = try std.fmt.allocPrint(allocator, "solutions/{}/{}.solution", .{ problem.id, best_score_saved });
-                        defer allocator.free(path);
-                        try std.fs.cwd().deleteFile(path);
+                        // const path = try std.fmt.allocPrint(allocator, "solutions/{}/{}.solution", .{ problem.id, best_score_saved });
+                        // defer allocator.free(path);
+                        // try std.fs.cwd().deleteFile(path);
                         // std.debug.print("Removing {s}\n", .{ path });
                     }
 
@@ -501,27 +501,27 @@ pub fn main() !void {
                     std.mem.copy(Point, best_stack, stack);
                     dt = @intCast(u64, std.time.timestamp() - 1626040800);
                     const dt2 = timer.read() / 1_000_000;
-                    // std.debug.print("  [{}] {:0>2}:{:0>2}:{:0>2} (T+{:0>2}:{:0>2}:{:0>2}.{:0>3}) Found score={}\n", .{
-                    //     problem.id,
-                    //     @divFloor(dt, 3600), @mod(@divFloor(dt, 60), 60), @mod(dt, 60),
-                    //     @divFloor(dt2, 3600000), @mod(@divFloor(dt2, 60000), 60), @mod(@divFloor(dt, 1000), 60), @mod(dt2, 1000),
-                    //     score
-                    // });
-                    // i = 0;
-                    // while (i < stack.len) : (i += 1) {
-                    //     var j: usize = 0;
-                    //     while (j < order.len) : (j += 1) {
-                    //         if (order[j] == i) {
-                    //             const p = stack[j];
-                    //             std.debug.print("[{},{}]", .{ p.x, p.y });
-                    //             if (i < stack.len - 1) {
-                    //                 std.debug.print(", ", .{});
-                    //             }
-                    //             break;
-                    //         }
-                    //     }
-                    // }
-                    // std.debug.print("]\n", .{});
+                    std.debug.print("  [{}] {:0>2}:{:0>2}:{:0>2} (T+{:0>2}:{:0>2}:{:0>2}.{:0>3}) Found score={} vertices=[", .{
+                        problem.id,
+                        @divFloor(dt, 3600), @mod(@divFloor(dt, 60), 60), @mod(dt, 60),
+                        @divFloor(dt2, 3600000), @mod(@divFloor(dt2, 60000), 60), @mod(@divFloor(dt, 1000), 60), @mod(dt2, 1000),
+                        score
+                    });
+                    i = 0;
+                    while (i < stack.len) : (i += 1) {
+                        var j: usize = 0;
+                        while (j < order.len) : (j += 1) {
+                            if (order[j] == i) {
+                                const p = stack[j];
+                                std.debug.print("[{},{}]", .{ p.x, p.y });
+                                if (i < stack.len - 1) {
+                                    std.debug.print(", ", .{});
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    std.debug.print("]\n", .{});
                     if (best_score <= target_score)
                         break :order;
                     try save_solution(problem, order, stack, allocator);
