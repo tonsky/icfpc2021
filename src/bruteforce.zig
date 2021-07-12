@@ -279,6 +279,7 @@ pub fn main() !void {
     var args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
     var id = try std.fmt.parseInt(u64, args[1], 10);
+    var target_score = try std.fmt.parseInt(u64, args[2], 10);
     var problem = try load_problem(id, allocator);
     defer std.json.parseFree(Problem, problem, .{ .allocator = allocator });
 
@@ -290,143 +291,216 @@ pub fn main() !void {
     defer allocator.free(edges_matrix);
 
     const vertices = problem.vertices.len;
+    const holes = problem.hole.len;
     const stack = try allocator.alloc(Point, vertices);
     defer allocator.free(stack);
 
     const order = try allocator.alloc(usize, vertices);
     defer allocator.free(order);
-    {
-        var i: usize = 0;
-        while (i < vertices) : (i += 1) {
-            order[i] = i;
-        } 
-    }
-
+    var i: usize = 0;
     var stack_idx: usize = 0;
+    const max_stack_idx: usize = if (target_score == 0) problem.hole.len else 0;
     var epsilon = @intToFloat(f64, problem.epsilon) / 1000000.0;
-    stack[0] = Point{ .x = problem.minx, .y = problem.miny };
     var best_score: i64 = -1;
     var best_stack: []Point = try allocator.alloc(Point, vertices);
     defer allocator.free(best_stack);
-    outer: while (true) {
-        const x = stack[stack_idx].x;
-        const y = stack[stack_idx].y;
 
-        // std.debug.print("x={} y={} maxx={} maxy={} stack_idx={} ", .{ x, y, problem.maxx, problem.maxy, stack_idx });
-        // for (stack) |p, j| {
-        //     if (j <= stack_idx) {
-        //         std.debug.print("[{},{}], ", .{ p.x, p.y });
-        //     }
-        // }
-        // std.debug.print("\n", .{});
+    i = 0;
+    while (i < max_stack_idx) : (i += 1) {
+        stack[i] = problem.hole[i];
+        order[i] = i;
+    }
 
-        if (y >= problem.maxy) {
-            if (stack_idx == 0) {
-                break;
-            } else {
-                stack_idx -= 1;
-                stack[stack_idx].x += 1;
-                continue;
+    order: while (true) {
+        if (stack_idx < max_stack_idx) {
+            if (order[stack_idx] >= vertices) {
+                if (stack_idx == 0) {
+                    break;
+                } else {
+                    stack_idx -= 1;
+                    order[stack_idx] += 1;
+                    continue :order;
+                }
+            }
+            
+            i = 0;
+            while (i < stack_idx) : (i += 1) {
+                if (order[i] == order[stack_idx]) {
+                    order[stack_idx] += 1;
+                    continue :order;
+                }
+            }
+
+            stack_idx += 1;
+            order[stack_idx] = 0;
+            continue :order;
+        }
+
+        i = stack_idx;
+        i: while (i < vertices) : (i += 1) { // order idx to fill
+            var j: usize = 0;
+            j: while (j < vertices) : (j += 1) { // possible value
+                var k: usize = 0;
+                while (k < i) : (k += 1) { // already used indices
+                    if (order[k] == j) {
+                        continue :j;
+                    }
+                }
+                order[i] = j;
+                continue :i;
             }
         }
 
-        if (x >= problem.maxx) {
-            stack[stack_idx].x = problem.minx;
-            stack[stack_idx].y += 1;
-            continue;
-        }
-
-        const inside_idx = @intCast(usize, (y - problem.miny) * (problem.maxx - problem.minx) + (x - problem.minx));
-        if (!inside[inside_idx]) {
-            stack[stack_idx].x += 1;
-            continue;
-        }
+        // std.debug.print("Trying {any}\n", .{ order[0..max_stack_idx] });
 
         // if edges have acceptable length
-        var i: usize = 0;
-        while (i < stack_idx) : (i += 1) { // all vertices already set
-            const old_len = edges_matrix[order[i] * vertices + order[stack_idx]];
-            if (old_len > 0) { // edge exist
-                const new_len = distance(stack[i], stack[stack_idx]);
-                if (std.math.absFloat(new_len / old_len - 1.0) > epsilon) {
-                    if (new_len > old_len) { // optimization!
-                        const nexty = stack[i].y - @floatToInt(i64, std.math.ceil(std.math.sqrt(old_len * (1.0 + epsilon))));
-                        if (nexty > stack[stack_idx].y) {
-                            stack[stack_idx].y = nexty;
-                            stack[stack_idx].x = problem.minx;
-                            continue :outer;
-                        } else if (@intToFloat(f64, stack[stack_idx].y - stack[i].y) > std.math.sqrt(old_len * (1.0 + epsilon))) {
-                            stack[stack_idx].y = problem.maxy;
-                            continue :outer;
-                        } else if (stack[stack_idx].x > stack[i].x) {
-                            stack[stack_idx].x = problem.maxx;
-                            continue :outer;
-                        } else {
-                            const dx = @floatToInt(i64, std.math.floor(std.math.sqrt(new_len) - std.math.sqrt(old_len * (1.0 + epsilon))));
-                            if (dx > 0) {
-                                stack[stack_idx].x += dx;
-                                continue :outer;
-                            }
-                        }
-                    } else if (new_len < old_len) {
-                        if (stack[stack_idx].x < stack[i].x) {
-                            stack[stack_idx].x = stack[i].x + stack[i].x - stack[stack_idx].x;
-                            continue :outer;
-                        }
+        stack_idx = 0;
+        while (stack_idx < max_stack_idx) : (stack_idx += 1) {
+            i = 0;
+            while (i < stack_idx) : (i += 1) { // all vertices already set
+                const old_len = edges_matrix[order[i] * vertices + order[stack_idx]];
+                if (old_len > 0) { // edge exist
+                    const new_len = distance(stack[i], stack[stack_idx]);
+                    if (std.math.absFloat(new_len / old_len - 1.0) > epsilon) {
+                        stack_idx = max_stack_idx - 1;
+                        order[stack_idx] += 1;
+                        continue :order;
                     }
-                    stack[stack_idx].x += 1;
-                    continue :outer;
                 }
             }
         }
 
-        // if edges intersect hole
-        i = 0;
-        while (i < stack_idx) : (i += 1) { // all vertices already set
-            const old_len = edges_matrix[order[i] * vertices + order[stack_idx]];
-            if (old_len > 0) { // edge exist
-                // iterate over hole edges
-                var from: usize = 0;
-                while (from < problem.hole.len) : (from += 1) {
-                    const to: usize = try std.math.mod(usize, from + 1, problem.hole.len);
-                    if (intersect_really(stack[i], stack[stack_idx], problem.hole[from], problem.hole[to])) {
+        stack[max_stack_idx] = Point{ .x = problem.minx, .y = problem.miny };
+        outer: while (true) {
+            const x = stack[stack_idx].x;
+            const y = stack[stack_idx].y;
+
+            // std.debug.print("x={} y={} maxx={} maxy={} stack_idx={} ", .{ x, y, problem.maxx, problem.maxy, stack_idx });
+            // for (stack) |p, j| {
+            //     if (j <= stack_idx) {
+            //         std.debug.print("[{},{}], ", .{ p.x, p.y });
+            //     }
+            // }
+            // std.debug.print("\n", .{});
+
+            if (y >= problem.maxy) {
+                if (stack_idx == max_stack_idx) {
+                    break :outer;
+                } else {
+                    stack_idx -= 1;
+                    stack[stack_idx].x += 1;
+                    continue :outer;
+                }
+            }
+
+            if (x >= problem.maxx) {
+                stack[stack_idx].x = problem.minx;
+                stack[stack_idx].y += 1;
+                continue :outer;
+            }
+
+            const inside_idx = @intCast(usize, (y - problem.miny) * (problem.maxx - problem.minx) + (x - problem.minx));
+            if (!inside[inside_idx]) {
+                stack[stack_idx].x += 1;
+                continue :outer;
+            }
+
+            // if edges have acceptable length
+            i = 0;
+            while (i < stack_idx) : (i += 1) { // all vertices already set
+                const old_len = edges_matrix[order[i] * vertices + order[stack_idx]];
+                if (old_len > 0) { // edge exist
+                    const new_len = distance(stack[i], stack[stack_idx]);
+                    if (std.math.absFloat(new_len / old_len - 1.0) > epsilon) {
+                        if (new_len > old_len) { // optimization!
+                            const nexty = stack[i].y - @floatToInt(i64, std.math.ceil(std.math.sqrt(old_len * (1.0 + epsilon))));
+                            if (nexty > stack[stack_idx].y) {
+                                stack[stack_idx].y = nexty;
+                                stack[stack_idx].x = problem.minx;
+                                continue :outer;
+                            } else if (@intToFloat(f64, stack[stack_idx].y - stack[i].y) > std.math.sqrt(old_len * (1.0 + epsilon))) {
+                                stack[stack_idx].y = problem.maxy;
+                                continue :outer;
+                            } else if (stack[stack_idx].x > stack[i].x) {
+                                stack[stack_idx].x = problem.maxx;
+                                continue :outer;
+                            } else {
+                                const dx = @floatToInt(i64, std.math.floor(std.math.sqrt(new_len) - std.math.sqrt(old_len * (1.0 + epsilon))));
+                                if (dx > 0) {
+                                    stack[stack_idx].x += dx;
+                                    continue :outer;
+                                }
+                            }
+                        } else if (new_len < old_len) {
+                            if (stack[stack_idx].x < stack[i].x) {
+                                stack[stack_idx].x = stack[i].x + stack[i].x - stack[stack_idx].x;
+                                continue :outer;
+                            }
+                        }
                         stack[stack_idx].x += 1;
                         continue :outer;
                     }
                 }
             }
-        }
 
-        if (stack_idx == vertices - 1) {
-            const score = calc_score(problem, stack);
-            if (best_score == -1 or score < best_score) {
-                best_score = score;
-                std.mem.copy(Point, best_stack, stack);
-                std.debug.print("score={} time={} ms vertices=[", .{ score, timer.read() / 1_000_000 });
-                i = 0;
-                while (i < stack.len) : (i += 1) {
-                    var j: usize = 0;
-                    while (j < order.len) : (j += 1) {
-                        if (order[j] == i) {
-                            const p = stack[j];
-                            std.debug.print("[{},{}]", .{ p.x, p.y });
-                            if (i < stack.len - 1) {
-                                std.debug.print(", ", .{});
-                            }
-                            break;
+            // if edges intersect hole
+            i = 0;
+            while (i < stack_idx) : (i += 1) { // all vertices already set
+                const old_len = edges_matrix[order[i] * vertices + order[stack_idx]];
+                if (old_len > 0) { // edge exist
+                    // iterate over hole edges
+                    var from: usize = 0;
+                    while (from < holes) : (from += 1) {
+                        const to: usize = try std.math.mod(usize, from + 1, holes);
+                        if (intersect_really(stack[i], stack[stack_idx], problem.hole[from], problem.hole[to])) {
+                            stack[stack_idx].x += 1;
+                            continue :outer;
                         }
                     }
                 }
-                std.debug.print("]\n", .{});
-                try save_solution(problem, order, stack, allocator);
             }
-            stack[stack_idx].x += 1;
-            continue;
+
+            if (stack_idx == vertices - 1) {
+                const score = calc_score(problem, stack);
+                if (best_score == -1 or score < best_score) {
+                    best_score = score;
+                    std.mem.copy(Point, best_stack, stack);
+                    std.debug.print("score={} time={} ms vertices=[", .{ score, timer.read() / 1_000_000 });
+                    i = 0;
+                    while (i < stack.len) : (i += 1) {
+                        var j: usize = 0;
+                        while (j < order.len) : (j += 1) {
+                            if (order[j] == i) {
+                                const p = stack[j];
+                                std.debug.print("[{},{}]", .{ p.x, p.y });
+                                if (i < stack.len - 1) {
+                                    std.debug.print(", ", .{});
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    std.debug.print("]\n", .{});
+                    if (best_score <= target_score)
+                        break :order;
+                    // try save_solution(problem, order, stack, allocator);
+                }
+                stack[stack_idx].x += 1;
+                continue;
+            }
+
+            stack_idx += 1;
+            stack[stack_idx].x = problem.minx;
+            stack[stack_idx].y = problem.miny;
         }
 
-        stack_idx += 1;
-        stack[stack_idx].x = problem.minx;
-        stack[stack_idx].y = problem.miny;
+        if (max_stack_idx == 0) {
+            break :order;
+        } else {
+            stack_idx = max_stack_idx - 1;
+            order[stack_idx] += 1;
+            continue :order;
+        }
     }
 
     if (best_score > -1) {

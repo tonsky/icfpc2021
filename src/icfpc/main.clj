@@ -334,7 +334,7 @@
         (fn [exception] (println "Refused:" (.getMessage exception)))))))
 
 (defn -main [& args]
-  (reset! *problem-id 48)
+  (reset! *problem-id 38)
   (App/init)
   (let [window  (App/makeWindow)
         layer   (LayerMetal.)
