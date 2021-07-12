@@ -149,7 +149,7 @@
   (try
     (reduce * 1 (range 1 (inc n)))
     (catch Exception e
-      Double/NaN)))
+      Double/MAX_VALUE)))
 
 (defn draw-hole [canvas]
   (let [scale @*scale
@@ -334,7 +334,7 @@
         (fn [exception] (println "Refused:" (.getMessage exception)))))))
 
 (defn -main [& args]
-  (reset! *problem-id 38)
+  (reset! *problem-id 50)
   (App/init)
   (let [window  (App/makeWindow)
         layer   (LayerMetal.)

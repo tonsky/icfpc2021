@@ -27,7 +27,7 @@ const Orientation = enum { colinear, counterclockwise, clockwise };
 pub fn load_problem(id: u64, allocator: *std.mem.Allocator) !Problem {
     const path = try std.fmt.allocPrint(allocator, "problems/{}.problem", .{ id });
     defer allocator.free(path);
-    std.debug.print("Loading {s}\n", .{ path });
+    // std.debug.print("  [{}] Loading {s}\n", .{ id, path });
     var file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
     const stat = try file.stat();
@@ -239,10 +239,11 @@ pub fn save_solution(problem: Problem, order: []const usize, vertices: []Point, 
     const path = try std.fmt.allocPrint(allocator, "{s}/{}.solution", .{ dir, score });
     defer allocator.free(path);
     const file = std.fs.cwd().createFile(path, .{ .exclusive = true }) catch |err| {
-        std.debug.print("File exists: {s}/{s}\n", .{ dir, path });
+        // const dt = @intCast(u64, std.time.timestamp() - 1626040800);
+        // std.debug.print("  [{}] {:0>2}:{:0>2}:{:0>2} File exists: {s}/{s}\n", .{ problem.id, @divFloor(dt, 3600), @mod(@divFloor(dt, 60), 60), @mod(dt, 60), dir, path });
         return;
     };
-    std.debug.print("Saving {s}\n", .{ path });
+    // std.debug.print("Saving {s}\n", .{ path });
     defer file.close();
     const writer = file.writer();
     try writer.writeAll("{\"vertices\":[");
@@ -268,6 +269,10 @@ pub fn save_solution(problem: Problem, order: []const usize, vertices: []Point, 
     try writer.writeAll("]}");
 }
 
+// pub hh() i64 {
+//     std.time.tmestamp()
+// }
+
 pub fn main() !void {
     const timer = std.time.Timer.start() catch unreachable;
 
@@ -283,7 +288,12 @@ pub fn main() !void {
     var problem = try load_problem(id, allocator);
     defer std.json.parseFree(Problem, problem, .{ .allocator = allocator });
 
-    std.debug.print("Hole {}..{} x {}..{}, edges {}, vertices {}\n", .{problem.minx, problem.maxx, problem.miny, problem.maxy, problem.edges.len, problem.vertices.len});
+    var dt: u64 = @intCast(u64, std.time.timestamp() - 1626040800);
+    std.debug.print("> [{}] {:0>2}:{:0>2}:{:0>2} Starting area {}..{} x {}..{}, holes {}, edges {}, vertices {}, best {}\n", .{
+        problem.id,
+        @divFloor(dt, 3600), @mod(@divFloor(dt, 60), 60), @mod(dt, 60),
+        problem.minx, problem.maxx, problem.miny, problem.maxy, problem.hole.len, problem.edges.len, problem.vertices.len, target_score
+    });
     const inside = try calc_inside(problem, allocator);
     defer allocator.free(inside);
 
@@ -302,6 +312,7 @@ pub fn main() !void {
     const max_stack_idx: usize = if (target_score == 0) problem.hole.len else 0;
     var epsilon = @intToFloat(f64, problem.epsilon) / 1000000.0;
     var best_score: i64 = -1;
+    var best_score_saved: i64 = -1;
     var best_stack: []Point = try allocator.alloc(Point, vertices);
     defer allocator.free(best_stack);
 
@@ -331,44 +342,60 @@ pub fn main() !void {
                 }
             }
 
-            stack_idx += 1;
-            order[stack_idx] = 0;
-            continue :order;
-        }
-
-        i = stack_idx;
-        i: while (i < vertices) : (i += 1) { // order idx to fill
-            var j: usize = 0;
-            j: while (j < vertices) : (j += 1) { // possible value
-                var k: usize = 0;
-                while (k < i) : (k += 1) { // already used indices
-                    if (order[k] == j) {
-                        continue :j;
-                    }
-                }
-                order[i] = j;
-                continue :i;
-            }
-        }
-
-        // std.debug.print("Trying {any}\n", .{ order[0..max_stack_idx] });
-
-        // if edges have acceptable length
-        stack_idx = 0;
-        while (stack_idx < max_stack_idx) : (stack_idx += 1) {
+            // if edges have acceptable length
             i = 0;
             while (i < stack_idx) : (i += 1) { // all vertices already set
                 const old_len = edges_matrix[order[i] * vertices + order[stack_idx]];
                 if (old_len > 0) { // edge exist
                     const new_len = distance(stack[i], stack[stack_idx]);
                     if (std.math.absFloat(new_len / old_len - 1.0) > epsilon) {
-                        stack_idx = max_stack_idx - 1;
+                        // stack_idx = max_stack_idx - 1;
                         order[stack_idx] += 1;
                         continue :order;
                     }
                 }
             }
+
+            stack_idx += 1;
+            order[stack_idx] = 0;
+            continue :order;
         }
+
+        // determine best order for the rest of the stack
+        i = stack_idx;
+        while (i < vertices) : (i += 1) { // order idx to fill
+            var j: usize = 0;
+            var most_edges_outgoing: usize = 0;
+            var most_edges_existing: usize = 0;
+            var most_edges_j: usize = 0;
+            j: while (j < vertices) : (j += 1) { // possible value
+                var k: usize = 0;
+                var edges_existing: usize = 0;
+                var edges_outgoing: usize = 0;
+                while (k < i) : (k += 1) { // already used indices
+                    if (order[k] == j) {
+                        continue :j;
+                    }
+                    if (edges_matrix[order[k] * vertices + j] > 0) {
+                        edges_existing += 1;
+                    }
+                }
+                k = 0;
+                while (k < vertices) : (k += 1) { // other vertices
+                    if (edges_matrix[k * vertices + j] > 0) {
+                        edges_outgoing += 1;
+                    }
+                }
+                if (edges_existing > most_edges_existing or (edges_existing == most_edges_existing and edges_outgoing > most_edges_outgoing)) {
+                    most_edges_existing = edges_existing;
+                    most_edges_outgoing = edges_outgoing;
+                    most_edges_j = j;
+                }
+            }
+            order[i] = most_edges_j;
+        }
+
+        // std.debug.print("Trying {any}\n", .{ order });
 
         stack[max_stack_idx] = Point{ .x = problem.minx, .y = problem.miny };
         outer: while (true) {
@@ -463,27 +490,42 @@ pub fn main() !void {
             if (stack_idx == vertices - 1) {
                 const score = calc_score(problem, stack);
                 if (best_score == -1 or score < best_score) {
+                    if (best_score_saved != -1) {
+                        const path = try std.fmt.allocPrint(allocator, "solutions/{}/{}.solution", .{ problem.id, best_score_saved });
+                        defer allocator.free(path);
+                        try std.fs.cwd().deleteFile(path);
+                        // std.debug.print("Removing {s}\n", .{ path });
+                    }
+
                     best_score = score;
                     std.mem.copy(Point, best_stack, stack);
-                    std.debug.print("score={} time={} ms vertices=[", .{ score, timer.read() / 1_000_000 });
-                    i = 0;
-                    while (i < stack.len) : (i += 1) {
-                        var j: usize = 0;
-                        while (j < order.len) : (j += 1) {
-                            if (order[j] == i) {
-                                const p = stack[j];
-                                std.debug.print("[{},{}]", .{ p.x, p.y });
-                                if (i < stack.len - 1) {
-                                    std.debug.print(", ", .{});
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    std.debug.print("]\n", .{});
+                    dt = @intCast(u64, std.time.timestamp() - 1626040800);
+                    const dt2 = timer.read() / 1_000_000;
+                    // std.debug.print("  [{}] {:0>2}:{:0>2}:{:0>2} (T+{:0>2}:{:0>2}:{:0>2}.{:0>3}) Found score={}\n", .{
+                    //     problem.id,
+                    //     @divFloor(dt, 3600), @mod(@divFloor(dt, 60), 60), @mod(dt, 60),
+                    //     @divFloor(dt2, 3600000), @mod(@divFloor(dt2, 60000), 60), @mod(@divFloor(dt, 1000), 60), @mod(dt2, 1000),
+                    //     score
+                    // });
+                    // i = 0;
+                    // while (i < stack.len) : (i += 1) {
+                    //     var j: usize = 0;
+                    //     while (j < order.len) : (j += 1) {
+                    //         if (order[j] == i) {
+                    //             const p = stack[j];
+                    //             std.debug.print("[{},{}]", .{ p.x, p.y });
+                    //             if (i < stack.len - 1) {
+                    //                 std.debug.print(", ", .{});
+                    //             }
+                    //             break;
+                    //         }
+                    //     }
+                    // }
+                    // std.debug.print("]\n", .{});
                     if (best_score <= target_score)
                         break :order;
-                    // try save_solution(problem, order, stack, allocator);
+                    try save_solution(problem, order, stack, allocator);
+                    best_score_saved = score;
                 }
                 stack[stack_idx].x += 1;
                 continue;
@@ -503,8 +545,12 @@ pub fn main() !void {
         }
     }
 
+    dt = @intCast(u64, std.time.timestamp() - 1626040800);
     if (best_score > -1) {
         try save_solution(problem, order, best_stack, allocator);
+        std.debug.print("+ [{}] {:0>2}:{:0>2}:{:0>2} Solved at {} in {} ms\n", .{ problem.id, @divFloor(dt, 3600), @mod(@divFloor(dt, 60), 60), @mod(dt, 60), best_score, timer.read() / 1_000_000 });
+    } else {
+        std.debug.print("- [{}] {:0>2}:{:0>2}:{:0>2} No solution found in {} ms\n", .{ problem.id, @divFloor(dt, 3600), @mod(@divFloor(dt, 60), 60), @mod(dt, 60), timer.read() / 1_000_000 });
+        std.os.exit(1);
     }
-    std.debug.print("Solved in {} ms\n", .{ timer.read() / 1_000_000 });
 }
