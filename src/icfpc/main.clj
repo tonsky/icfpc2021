@@ -51,15 +51,18 @@
       (reduce + 0))))
 
 (defn load-ladder []
-  (println "Loading ladder from https://poses.live/problems")
-  (->> (http/get "https://poses.live/problems" {:headers {"Cookie" (System/getenv "ICFPC2021_COOKIE")}})
+  #_(println "Loading ladder from https://poses.live/problems")
+  #_(->> (http/get "https://poses.live/problems" {:headers {"Cookie" (System/getenv "ICFPC2021_COOKIE")}})
     :body
     (re-seq #"<tr><td><a href=\"/problems/(\d+)\">\d+</a></td><td>(\d+|❌)?</td><td>(\d+)?</td></tr>")
     (map (fn [[_ id submitted best]]
            [(some-> id Long/parseLong)
             {:submitted (if (= "❌" submitted) -1 (some-> submitted Long/parseLong))
              :best (some-> best Long/parseLong)}]))
-    (into {})))
+    (into {}))
+  (into {}
+    (for [i (range 1 133)]
+      [i {:submitted nil :best 0}])))
 
 (def *ladder (atom (load-ladder)))
 
